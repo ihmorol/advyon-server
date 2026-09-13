@@ -1,4 +1,4 @@
-export const CaseStatus = ['active', 'pending', 'review', 'closed'] as const;
+export const CaseStatus = ['active', 'pending', 'review', 'closed', 'archived'] as const;
 
 export const CaseUrgency = ['low', 'medium', 'high'] as const;
 

@@ -1,4 +1,9 @@
-// src/app/modules/user/admin/admin.route.ts
+/**
+ * @fileoverview Admin module routes.
+ * Provides endpoints for user management, case oversight,
+ * system settings, analytics overview, bulk operations, and audit logs.
+ * All routes require admin or superAdmin role.
+ */
 import express from 'express';
 import { AdminController } from './admin.controller';
 import auth from '../../middlewares/auth';
@@ -10,36 +15,16 @@ import {
   updateUserRoleSchema,
   updateUserStatusSchema,
   deleteUserParamsSchema,
+  bulkUpdateUsersSchema,
+  updateSystemSettingsSchema,
+  getAuditLogsQuerySchema,
 } from './admin.validation';
 
 const router = express.Router();
 
-/**
- * @swagger
- * tags:
- *   name: Admin
- *   description: Admin user management
- */
+// ─── User Management ─────────────────────────────────────────────
 
-/**
- * @swagger
- * /admin/users:
- *   get:
- *     summary: Get all users (Admin)
- *     description: Retrieves all users with pagination and filtering.
- *     tags: [Admin]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: role
- *         schema:
- *           type: string
- *         description: Filter by user role
- *     responses:
- *       200:
- *         description: List of users
- */
+/** GET /admin/users — List all users with pagination and filtering */
 router.get(
   '/users',
   auth('admin', 'superAdmin'),
@@ -47,25 +32,7 @@ router.get(
   AdminController.getAllUsers,
 );
 
-/**
- * @swagger
- * /admin/users/{id}:
- *   get:
- *     summary: Get a single user (Admin)
- *     description: Retrieves details of a specific user.
- *     tags: [Admin]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: User details
- */
+/** GET /admin/users/:id — Get a single user by ID */
 router.get(
   '/users/:id',
   auth('admin', 'superAdmin'),
@@ -73,37 +40,7 @@ router.get(
   AdminController.getSingleUser,
 );
 
-/**
- * @swagger
- * /admin/users/{id}/role:
- *   patch:
- *     summary: Update user role
- *     description: Updates the role of a user.
- *     tags: [Admin]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - role
- *             properties:
- *               role:
- *                 type: string
- *                 enum: [admin, lawyer, client]
- *     responses:
- *       200:
- *         description: User role updated
- */
+/** PATCH /admin/users/:id/role — Update user role (superAdmin only) */
 router.patch(
   '/users/:id/role',
   auth('superAdmin'),
@@ -111,37 +48,7 @@ router.patch(
   AdminController.updateUserRole,
 );
 
-/**
- * @swagger
- * /admin/users/{id}/status:
- *   patch:
- *     summary: Update user status
- *     description: Updates the status of a user (e.g., active, suspended).
- *     tags: [Admin]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - status
- *             properties:
- *               status:
- *                 type: string
- *                 enum: [active, blocked]
- *     responses:
- *       200:
- *         description: User status updated
- */
+/** PATCH /admin/users/:id/status — Update user status */
 router.patch(
   '/users/:id/status',
   auth('admin', 'superAdmin'),
@@ -149,30 +56,83 @@ router.patch(
   AdminController.updateUserStatus,
 );
 
-/**
- * @swagger
- * /admin/users/{id}:
- *   delete:
- *     summary: Soft delete user
- *     description: Soft deletes a user account.
- *     tags: [Admin]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: User soft deleted
- */
+/** DELETE /admin/users/:id — Soft delete user */
 router.delete(
   '/users/:id',
-  auth('superAdmin'),
+  auth('admin', 'superAdmin'),
   validateRequest(deleteUserParamsSchema),
   AdminController.softDeleteUser,
+);
+
+// ─── Bulk Operations ─────────────────────────────────────────────
+
+/** POST /admin/users/bulk — Bulk activate/block/delete users */
+router.post(
+  '/users/bulk',
+  auth('admin', 'superAdmin'),
+  validateRequest(bulkUpdateUsersSchema),
+  AdminController.bulkUpdateUsers,
+);
+
+// ─── Case Oversight ──────────────────────────────────────────────
+
+/** GET /admin/cases/overview — Aggregated case stats */
+router.get(
+  '/cases/overview',
+  auth('admin', 'superAdmin'),
+  AdminController.getCaseOverview,
+);
+
+// ─── System Settings ─────────────────────────────────────────────
+
+/** GET /admin/settings — Get system settings */
+router.get(
+  '/settings',
+  auth('admin', 'superAdmin'),
+  AdminController.getSystemSettings,
+);
+
+/** PATCH /admin/settings — Update system settings */
+router.patch(
+  '/settings',
+  auth('admin', 'superAdmin'),
+  validateRequest(updateSystemSettingsSchema),
+  AdminController.updateSystemSettings,
+);
+
+// ─── Analytics Overview ──────────────────────────────────────────
+
+/** GET /admin/analytics — Admin analytics summary */
+router.get(
+  '/analytics',
+  auth('admin', 'superAdmin'),
+  AdminController.getAnalyticsOverview,
+);
+
+// ─── Audit Logs ──────────────────────────────────────────────────
+
+/** GET /admin/audit-logs — Paginated audit log entries */
+router.get(
+  '/audit-logs',
+  auth('admin', 'superAdmin'),
+  validateRequest(getAuditLogsQuerySchema),
+  AdminController.getAuditLogs,
+);
+
+// ─── Lawyer Verification ─────────────────────────────────────────
+
+/** GET /admin/verifications — Get pending lawyer verifications */
+router.get(
+  '/verifications',
+  auth('admin', 'superAdmin'),
+  AdminController.getPendingLawyerVerifications,
+);
+
+/** PATCH /admin/verifications/:lawyerId — Review lawyer verification */
+router.patch(
+  '/verifications/:lawyerId',
+  auth('admin', 'superAdmin'),
+  AdminController.reviewLawyerVerification,
 );
 
 export const AdminRoutes = router;

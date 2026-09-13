@@ -17,25 +17,42 @@ import { generateUserId, getUserWithProfile } from './auth.utils';
  * Creates a new user if doesn't exist, returns existing user otherwise
  */
 const syncUserFromClerk = async (clerkUserId: string, email: string) => {
+  // Fetch from Clerk API to get the latest email and profile picture
+  let clerkUser: any;
+  let finalEmail = email;
+  let avatarUrl = '';
+  try {
+    clerkUser = await clerkClient.users.getUser(clerkUserId);
+    if (!finalEmail && clerkUser?.emailAddresses?.length > 0) {
+      const primaryEmail = clerkUser.emailAddresses.find((e: any) => e.id === clerkUser.primaryEmailAddressId);
+      finalEmail = primaryEmail ? primaryEmail.emailAddress : clerkUser.emailAddresses[0].emailAddress;
+    }
+    if (clerkUser?.imageUrl) {
+      avatarUrl = clerkUser.imageUrl;
+    }
+  } catch (error) {
+    console.error('Failed to fetch user from Clerk:', error);
+  }
+
   // Check if user already exists
   let existingUser = await User.findOne({ clerkUserId });
   
-  if (!existingUser && email) {
+  if (!existingUser && finalEmail) {
     // Check if user exists by email (legacy user or first time logging in with this email via Clerk)
-    existingUser = await User.findOne({ email });
+    existingUser = await User.findOne({ email: finalEmail });
     
     if (existingUser) {
       // Link Clerk ID to existing user
       existingUser.clerkUserId = clerkUserId;
-      // If the existing user had a different role or status, we keep it.
-      // But we might want to ensure they have a role if they were in-progress? 
-      // Existing logic implies we just return them.
     }
   }
 
   if (existingUser) {
-    // Update last login time
+    // Update last login time and sync latest avatar
     existingUser.lastLoginAt = new Date();
+    if (avatarUrl && existingUser.avatarUrl !== avatarUrl) {
+      existingUser.avatarUrl = avatarUrl;
+    }
     await existingUser.save();
 
     return {
@@ -51,22 +68,6 @@ const syncUserFromClerk = async (clerkUserId: string, email: string) => {
 
   // Create new user with temporary default role
   const userId = await generateUserId('client'); // Temporary default
-
-  // Fallback email strategy:
-  // If no email provided, try to fetch from Clerk API
-  let finalEmail = email;
-  if (!finalEmail) {
-    try {
-      const clerkUser = await clerkClient.users.getUser(clerkUserId);
-      if (clerkUser.emailAddresses && clerkUser.emailAddresses.length > 0) {
-         // Use primary email if available (matched by ID), otherwise first one
-         const primaryEmail = clerkUser.emailAddresses.find(e => e.id === clerkUser.primaryEmailAddressId);
-         finalEmail = primaryEmail ? primaryEmail.emailAddress : clerkUser.emailAddresses[0].emailAddress;
-      }
-    } catch (error) {
-       console.error('Failed to fetch user from Clerk:', error);
-    }
-  }
 
   // Final fallback: create a UNIQUE placeholder to avoid E11000 duplicate key error.
   if (!finalEmail) {
@@ -96,7 +97,10 @@ const syncUserFromClerk = async (clerkUserId: string, email: string) => {
     email: finalEmail,
     role: 'client', // Temporary default, will be set during onboarding
     status: 'in-progress',
-    fullName: 'Guest User', // Temporary, will be updated during onboarding
+    fullName: clerkUser?.firstName 
+                ? `${clerkUser.firstName} ${clerkUser.lastName || ''}`.trim() 
+                : 'Guest User',
+    avatarUrl,
     isEmailVerified: true, // Clerk handles email verification
     needsPasswordChange: false, // Clerk handles authentication
     lastLoginAt: new Date(),

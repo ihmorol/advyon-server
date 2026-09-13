@@ -52,11 +52,15 @@ const globalErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
       },
     ];
   } else if (err instanceof Error) {
-    message = err.message;
+    // Unknown errors may leak internal details (DB/Stripe/AI provider),
+    // so never expose the raw message to the client. Log the full
+    // error (message + stack) server-side for debugging instead.
+    console.error('Unhandled error:', err);
+    message = 'Something went wrong!';
     errorSources = [
       {
         path: '',
-        message: err?.message,
+        message: 'Something went wrong',
       },
     ];
   }

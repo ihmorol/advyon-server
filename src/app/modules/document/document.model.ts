@@ -59,6 +59,11 @@ const documentSchema = new Schema<TDocument>(
       type: String,
       required: true,
     },
+    mimeType: {
+      type: String,
+      required: true,
+      default: 'application/octet-stream',
+    },
     fileSize: {
       type: Number,
       required: true,
@@ -134,6 +139,17 @@ const documentSchema = new Schema<TDocument>(
       default: false,
     },
     deletedAt: {
+      type: Date,
+      default: null,
+    },
+
+    // Archive status
+    status: {
+      type: String,
+      enum: ['active', 'archived'],
+      default: 'active',
+    },
+    archivedAt: {
       type: Date,
       default: null,
     },

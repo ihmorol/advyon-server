@@ -38,8 +38,8 @@ const createUser = async (file: any, payload: any) => {
     } else if (userData.role === 'admin') {
       generatedId = await generateAdminId();
     } else {
-        // Fallback or error
-        throw new AppError(httpStatus.BAD_REQUEST, 'Invalid role for user creation');
+      // Fallback or error
+      throw new AppError(httpStatus.BAD_REQUEST, 'Invalid role for user creation');
     }
 
     userData.id = generatedId;
@@ -68,20 +68,6 @@ const createUser = async (file: any, payload: any) => {
       judge.userId = user_id;
       await JudgeProfile.create([judge], { session });
     }
-
-    // Assign Role (UserRole)
-    // Assuming Role exists. If not, we might need to find it or create it.
-    // For now, I'll assume the `role` string in User is enough, but if we need `UserRole` table:
-    // I need to find the Role by code (e.g. 'client').
-    // const roleDoc = await Role.findOne({ code: userData.role });
-    // if (roleDoc) {
-    //   await UserRole.create([{
-    //       id: userId, // or generate unique ID for UserRole
-    //       userId: newUser[0].id,
-    //       roleId: roleDoc.id,
-    //       isPrimary: true
-    //   }], { session });
-    // }
 
     await session.commitTransaction();
     await session.endSession();
@@ -158,6 +144,10 @@ const getMyProfile = async (userId: string) => {
   if (roleProfile) {
     profile.phone = roleProfile.phoneNumber || roleProfile.contactNumber || '';
     profile.address = roleProfile.address || '';
+    if (user.role === 'lawyer' || user.role === 'judge') {
+      profile.verificationStatus = roleProfile.verificationStatus || 'pending';
+      profile.verificationNotes = roleProfile.verificationNotes || '';
+    }
   }
 
   return profile;
@@ -169,7 +159,7 @@ const getPreferences = async (userId: string) => {
   if (!user) {
     throw new AppError(httpStatus.NOT_FOUND, 'User not found');
   }
-  
+
   // Return preferences with defaults if not set
   return user.preferences || {
     theme: 'system',
@@ -192,7 +182,7 @@ const updatePreferences = async (userId: string, preferences: any) => {
   if (!user) {
     throw new AppError(httpStatus.NOT_FOUND, 'User not found');
   }
-  
+
   // Merge existing preferences with new ones (deep merge)
   const currentPrefs = user.preferences as any || {};
   const mergedPreferences = {
@@ -208,13 +198,13 @@ const updatePreferences = async (userId: string, preferences: any) => {
       defaultView: preferences.dashboardConfig?.defaultView ?? currentPrefs.dashboardConfig?.defaultView ?? 'classic',
     },
   };
-  
+
   const result = await User.findOneAndUpdate(
     { id: userId },
     { preferences: mergedPreferences },
     { new: true }
   );
-  
+
   return result?.preferences;
 };
 
@@ -255,8 +245,8 @@ const updateMyProfile = async (userId: string, payload: Partial<TUser>) => {
 
 // Change password
 const changePassword = async (
-  userId: string, 
-  currentPassword: string, 
+  userId: string,
+  currentPassword: string,
   newPassword: string
 ) => {
   const user = await User.findOne({ id: userId }).select('+password');
@@ -279,7 +269,7 @@ const changePassword = async (
 
   const result = await User.findOneAndUpdate(
     { id: userId },
-    { 
+    {
       password: hashedPassword,
       passwordChangedAt: new Date(),
       needsPasswordChange: false,
@@ -304,7 +294,10 @@ const getLawyerClients = async (lawyerId: string) => {
   // Find users with access to these cases
   const accesses = await CaseAccessModel.find({
     caseId: { $in: caseIds },
-  }).populate('userId');
+    status: 'active',
+  })
+    .populate('userId')
+    .populate('caseId', 'id caseNumber title');
 
   // Extract unique clients
   const uniqueClients = new Map<string, any>();
@@ -315,7 +308,7 @@ const getLawyerClients = async (lawyerId: string) => {
       if (!uniqueClients.has(clientUser.id)) {
         // Fetch client profile for additional details
         const clientProfile = await ClientProfile.findOne({ userId: clientUser._id });
-        
+
         uniqueClients.set(clientUser.id, {
           id: clientUser.id,
           fullName: clientUser.fullName,
@@ -325,13 +318,209 @@ const getLawyerClients = async (lawyerId: string) => {
           phone: clientProfile?.phoneNumber || '',
           address: clientProfile?.address || '',
           accessStatus: access.status, // Status in the case
-          caseId: access.caseId, // Just one case reference for now
+          caseId: (access.caseId as any)?.id || String(access.caseId),
         });
       }
     }
   }
 
+  // Also getting users who are explicitly clientId in Case model
+  const casesWithClientId = await Case.find({
+    createdBy: user._id,
+    clientId: { $exists: true }
+  }).populate('clientId');
+
+  for (const c of casesWithClientId) {
+    const clientUser = c.clientId as any;
+    if (clientUser && !uniqueClients.has(clientUser.id)) {
+      const clientProfile = await ClientProfile.findOne({ userId: clientUser._id });
+      uniqueClients.set(clientUser.id, {
+        id: clientUser.id,
+        fullName: clientUser.fullName,
+        email: clientUser.email,
+        displayName: clientUser.displayName,
+        avatarUrl: clientUser.avatarUrl,
+        phone: clientProfile?.phoneNumber || '',
+        address: clientProfile?.address || '',
+        accessStatus: 'primary',
+        caseId: c._id,
+      });
+    }
+  }
+
   return Array.from(uniqueClients.values());
+};
+
+/**
+ * WBS-7.1: Get Client Detail with aggregated info
+ */
+const getClientDetail = async (clientId: string) => {
+  // 1. Get User info
+  const clientUser = await User.findOne({ id: clientId });
+  if (!clientUser) {
+    throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
+  }
+
+  // 2. Get Profile info
+  const clientProfile = await ClientProfile.findOne({ userId: clientUser._id });
+
+  // 3. Get Associated Cases
+  // Cases where they are the primary client or have access
+  const primaryCases = await Case.find({ clientId: clientUser._id });
+
+  // Also check CaseAccess
+  const accessRecords = await CaseAccessModel.find({ userId: clientUser._id }).populate('caseId');
+  const accessCases = accessRecords.map(a => a.caseId);
+
+  // Merge cases (dedup)
+  const allCasesMap = new Map();
+  primaryCases.forEach(c => allCasesMap.set(c.id, c));
+  accessCases.forEach((c: any) => allCasesMap.set(c.id, c));
+
+  // 4. Billing stub
+  const billingHistory = [
+    { id: 'inv-001', date: '2023-11-01', amount: 500, status: 'paid' },
+    { id: 'inv-002', date: '2023-12-01', amount: 350, status: 'pending' },
+  ];
+
+  return {
+    user: {
+      id: clientUser.id,
+      fullName: clientUser.fullName,
+      email: clientUser.email,
+      phone: clientProfile?.phoneNumber,
+      address: clientProfile?.address,
+      avatarUrl: clientUser.avatarUrl,
+    },
+    cases: Array.from(allCasesMap.values()),
+    billing: billingHistory,
+    stats: {
+      totalCases: allCasesMap.size,
+      openCases: Array.from(allCasesMap.values()).filter((c: any) => c.status !== 'closed' && c.status !== 'archived').length,
+    }
+  };
+};
+
+/**
+ * Archive Client (Soft delete)
+ */
+const archiveClient = async (clientId: string) => {
+  const result = await User.findOneAndUpdate(
+    { id: clientId },
+    { status: 'inactive' }, // Or isDeleted: true? 'archived' status not in enum yet, using 'inactive'
+    { new: true }
+  );
+  return result;
+};
+
+/**
+ * Get all lawyers with their profiles for the lawyer directory.
+ * Supports search (by name), filter (by practiceArea), and pagination.
+ */
+const getAllLawyers = async (query: Record<string, unknown>) => {
+  const {
+    search,
+    practiceArea,
+    page = 1,
+    limit = 12,
+  } = query as {
+    search?: string;
+    practiceArea?: string;
+    page?: number;
+    limit?: number;
+  };
+
+  const pageNum = Number(page);
+  const limitNum = Number(limit);
+  const skip = (pageNum - 1) * limitNum;
+
+  // Build user filter
+  const userFilter: Record<string, unknown> = {
+    role: 'lawyer',
+    isDeleted: { $ne: true },
+    status: 'active',
+  };
+
+  if (search) {
+    userFilter.fullName = { $regex: search, $options: 'i' };
+  }
+
+  // Get all matching lawyer users
+  const totalUsers = await User.countDocuments(userFilter);
+  const lawyerUsers = await User.find(userFilter)
+    .skip(skip)
+    .limit(limitNum)
+    .sort({ createdAt: -1 });
+
+  // Get lawyer profiles for these users
+  const userIds = lawyerUsers.map((u) => u._id);
+  const profiles = await LawyerProfile.find({ userId: { $in: userIds } });
+  const profileMap = new Map(profiles.map((p) => [String(p.userId), p]));
+
+  // Merge & optionally filter by practiceArea
+  let results = lawyerUsers.map((user) => {
+    const profile = profileMap.get(String(user._id));
+    return {
+      id: user.id,
+      fullName: user.fullName,
+      displayName: user.displayName,
+      email: user.email,
+      avatarUrl: user.avatarUrl,
+      bio: user.bio,
+      phone: user.phone,
+      address: user.address,
+      // Lawyer-specific fields
+      barRegistrationNumber: profile?.barRegistrationNumber || '',
+      barCouncilName: profile?.barCouncilName || '',
+      yearsOfExperience: profile?.yearsOfExperience || 0,
+      primaryPracticeArea: profile?.primaryPracticeArea || '',
+      verificationStatus: profile?.verificationStatus || 'pending',
+    };
+  });
+
+  // Filter by practice area if specified
+  if (practiceArea && practiceArea !== 'all') {
+    results = results.filter(
+      (r) => r.primaryPracticeArea.toLowerCase() === practiceArea.toLowerCase(),
+    );
+  }
+
+  return {
+    lawyers: results,
+    meta: {
+      total: practiceArea && practiceArea !== 'all' ? results.length : totalUsers,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(
+        (practiceArea && practiceArea !== 'all' ? results.length : totalUsers) / limitNum,
+      ),
+    },
+  };
+};
+
+/**
+ * Submit Lawyer Verification Request
+ */
+const submitVerificationRequest = async (userId: string, payload: any) => {
+  // Find lawyer profile by custom user id
+  const profile = await LawyerProfile.findOne({ id: userId });
+  if (!profile) {
+    throw new AppError(httpStatus.NOT_FOUND, 'Lawyer profile not found');
+  }
+
+  const { barRegistrationNumber, barCouncilName } = payload;
+  
+  const updateData: any = { verificationStatus: 'pending' };
+  if (barRegistrationNumber) updateData.barRegistrationNumber = barRegistrationNumber;
+  if (barCouncilName) updateData.barCouncilName = barCouncilName;
+
+  const updatedProfile = await LawyerProfile.findOneAndUpdate(
+    { id: userId },
+    updateData,
+    { new: true }
+  );
+
+  return updatedProfile;
 };
 
 export const UserServices = {
@@ -346,5 +535,9 @@ export const UserServices = {
   updateMyProfile,
   changePassword,
   getLawyerClients,
+  getClientDetail, // WBS-7.1
+  archiveClient,   // WBS-7.1
+  getAllLawyers,    // Lawyer Directory
+  addClient: createUser, // Reusing create for now, logic handled by role payload
+  submitVerificationRequest,
 };
-

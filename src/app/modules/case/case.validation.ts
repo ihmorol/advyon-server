@@ -9,7 +9,7 @@ export const CaseValidation = {
   createCaseValidation: z.object({
     body: z.object({
       title: z.string().min(3, 'Title must be at least 3 characters'),
-      caseNumber: z.string().min(1, 'Case number is required'),
+      caseNumber: z.string().min(1, 'Case number is required').optional(),
       caseType: z.string().min(1, 'Case type is required'),
       urgency: z.enum(['low', 'medium', 'high']).default('medium'),
       nextDeadline: z.string().datetime().optional(),

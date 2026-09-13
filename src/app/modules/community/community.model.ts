@@ -1,6 +1,25 @@
 import { Schema, model } from 'mongoose';
 import { TReply, TThread } from './community.interface';
 
+const moderationSnapshotSchema = new Schema(
+    {
+        status: {
+            type: String,
+            enum: ['pending', 'approved', 'review', 'rejected', 'appealed'],
+            default: 'pending',
+        },
+        confidence: { type: Number, default: 0 },
+        threshold: { type: Number, default: 0.72 },
+        toxicityScore: { type: Number, default: 0 },
+        spamScore: { type: Number, default: 0 },
+        offTopicScore: { type: Number, default: 0 },
+        reasons: [{ type: String }],
+        reviewId: { type: Schema.Types.ObjectId, ref: 'ModerationReview' },
+        lastCheckedAt: { type: Date },
+    },
+    { _id: false },
+);
+
 const replySchema = new Schema<TReply>({
     threadId: { type: Schema.Types.ObjectId, ref: 'Thread', required: true },
     content: { type: String, required: true },
@@ -8,6 +27,8 @@ const replySchema = new Schema<TReply>({
     upvotes: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     downvotes: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     isAcceptedAnswer: { type: Boolean, default: false },
+    isVisible: { type: Boolean, default: true },
+    moderation: { type: moderationSnapshotSchema, default: () => ({ status: 'pending' }) },
 }, { timestamps: true });
 
 const threadSchema = new Schema<TThread>({
@@ -26,6 +47,8 @@ const threadSchema = new Schema<TThread>({
     upvotesCount: { type: Number, default: 0 },
     repliesCount: { type: Number, default: 0 },
     isSolved: { type: Boolean, default: false },
+    isVisible: { type: Boolean, default: true },
+    moderation: { type: moderationSnapshotSchema, default: () => ({ status: 'pending' }) },
 }, {
     timestamps: true,
     toJSON: { virtuals: true },

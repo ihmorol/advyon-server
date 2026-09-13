@@ -1,6 +1,6 @@
 import { Types } from 'mongoose';
 
-export type TActivityType = 'case_created' | 'case_updated' | 'case_archived' | 'case_restored' | 'document_uploaded' | 'document_deleted' | 'system_alert' | 'user_joined' | 'document_moved';
+export type TActivityType = 'case_created' | 'case_updated' | 'case_archived' | 'case_restored' | 'case_deleted' | 'document_uploaded' | 'document_deleted' | 'system_alert' | 'user_joined' | 'document_moved';
 
 export interface TActivity {
   type: TActivityType;

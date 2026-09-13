@@ -19,6 +19,12 @@ export const openrouterClient = apiKey ? new OpenAI({
 
 // Vision model on OpenRouter
 export const OPENROUTER_VISION_MODEL = 'google/gemini-2.5-flash-lite';
+export const OPENROUTER_MODEL = OPENROUTER_VISION_MODEL;
+
+export const openRouterConfig = {
+  apiKey,
+  model: OPENROUTER_MODEL,
+};
 
 export const isOpenRouterAvailable = (): boolean => {
   return openrouterClient !== null;

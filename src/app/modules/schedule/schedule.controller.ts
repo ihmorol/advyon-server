@@ -1,15 +1,19 @@
-import { Request, Response } from 'express';
+import httpStatus from 'http-status';
 import catchAsync from '../../utils/catchAsync';
 import sendResponse from '../../utils/sendResponse';
-import httpStatus from 'http-status';
 import { ScheduleService } from './schedule.service';
 
-const createEvent = catchAsync(async (req: Request, res: Response) => {
-  // If user is authenticated, add them as creator
-  const userId = req.user?.userId;
-  const payload = { ...req.body, createdBy: userId };
-  
-  const result = await ScheduleService.createEvent(payload);
+/**
+ * WBS-6.1: Schedule Controller
+ * Enhanced with conflict detection and recurrence support.
+ */
+
+const createEvent = catchAsync(async (req, res) => {
+  const { userId } = req.user;
+  const result = await ScheduleService.createEvent({
+    ...req.body,
+    createdBy: userId,
+  });
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
@@ -19,9 +23,14 @@ const createEvent = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-const getAllEvents = catchAsync(async (req: Request, res: Response) => {
-  // Filter by user if not admin? For now, list all or filter by query
-  const result = await ScheduleService.getAllEvents(req.query);
+const getAllEvents = catchAsync(async (req, res) => {
+  const { userId } = req.user;
+  // If user is client, strict filter? If lawyer, maybe all?
+  // Current service enforces filtering by userId if passed in query, or we enforce it here.
+  // Let's pass userId to service to handle access logic or filtering.
+  const query = { ...req.query, userId };
+
+  const result = await ScheduleService.getAllEvents(query);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -31,8 +40,20 @@ const getAllEvents = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-const getEventById = catchAsync(async (req: Request, res: Response) => {
-  const result = await ScheduleService.getEventById(req.params.id);
+const getEventById = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const result = await ScheduleService.getEventById(id);
+
+  if (!result) {
+    // Return 404
+    // We could throw here but service returns null
+    return sendResponse(res, {
+      statusCode: httpStatus.NOT_FOUND,
+      success: false,
+      message: 'Event not found',
+      data: null
+    });
+  }
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -42,8 +63,18 @@ const getEventById = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-const updateEvent = catchAsync(async (req: Request, res: Response) => {
-  const result = await ScheduleService.updateEvent(req.params.id, req.body);
+const updateEvent = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const result = await ScheduleService.updateEvent(id, req.body);
+
+  if (!result) {
+    return sendResponse(res, {
+      statusCode: httpStatus.NOT_FOUND,
+      success: false,
+      message: 'Event not found',
+      data: null
+    });
+  }
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -53,8 +84,18 @@ const updateEvent = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-const deleteEvent = catchAsync(async (req: Request, res: Response) => {
-  const result = await ScheduleService.deleteEvent(req.params.id);
+const deleteEvent = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const result = await ScheduleService.deleteEvent(id);
+
+  if (!result) {
+    return sendResponse(res, {
+      statusCode: httpStatus.NOT_FOUND,
+      success: false,
+      message: 'Event not found',
+      data: null
+    });
+  }
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -64,23 +105,43 @@ const deleteEvent = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-const getTodaySchedule = catchAsync(async (req: Request, res: Response) => {
-  const userId = req.user?.userId;
+const getTodaySchedule = catchAsync(async (req, res) => {
+  const { userId } = req.user;
   const result = await ScheduleService.getTodaySchedule(userId);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: 'Today\'s schedule retrieved successfully',
+    message: "Today's schedule retrieved successfully",
     data: result,
   });
 });
 
-export const ScheduleController = {
+const checkConflict = catchAsync(async (req, res) => {
+  const { userId } = req.user;
+  const { date, startTime, endTime } = req.query; // Validated by Zod schema
+
+  const hasConflict = await ScheduleService.checkConflict(
+    userId,
+    new Date(date as string),
+    startTime as string,
+    endTime as string
+  );
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: hasConflict ? 'Conflict detected' : 'No conflict',
+    data: { hasConflict }
+  });
+});
+
+export const ScheduleControllers = {
   createEvent,
   getAllEvents,
   getEventById,
   updateEvent,
   deleteEvent,
-  getTodaySchedule
+  getTodaySchedule,
+  checkConflict
 };

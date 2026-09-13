@@ -1,0 +1,18 @@
+# Team ownership mapping for admin, commerce, and governance modules.
+# Ensures only Team 5 members can approve PRs touching these paths.
+
+# Server-side ownership
+/src/app/modules/admin/ @team5-leads
+/src/app/modules/payment/ @team5-leads
+/src/app/modules/subscription/ @team5-leads
+/src/app/config/stripe.config.ts @team5-leads
+/src/app/middlewares/rateLimiter.ts @team5-leads
+
+# Shared contracts
+/src/app/contracts/ @team5-leads
+
+# All environment and secret files
+.env* @team5-leads
+
+# Governance documentation
+/docs/governance/ @team5-leads

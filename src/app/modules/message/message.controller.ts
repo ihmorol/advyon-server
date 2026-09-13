@@ -3,51 +3,32 @@ import catchAsync from '../../utils/catchAsync';
 import sendResponse from '../../utils/sendResponse';
 import { MessageServices } from './message.service';
 
-/**
- * Phase 1.2: Message Controller
- * Handles HTTP requests for messages/client requests
- */
-
-// Get messages for logged-in user
-const getMyMessages = catchAsync(async (req, res) => {
+const getMessagesForUser = catchAsync(async (req, res) => {
   const { userId } = req.user;
-  const { status, page, limit } = req.query;
-  
-  const result = await MessageServices.getMessagesForUser(userId, {
-    status: status as string,
-    page: page ? parseInt(page as string) : 1,
-    limit: limit ? parseInt(limit as string) : 10,
-  });
-
+  const result = await MessageServices.getMessagesForUser(userId, req.query);
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: 'Messages retrieved successfully',
-    data: result.messages,
-    meta: result.meta,
-  });
-});
-
-// Get pending messages count
-const getPendingCount = catchAsync(async (req, res) => {
-  const { userId } = req.user;
-  const result = await MessageServices.getPendingCount(userId);
-
-  sendResponse(res, {
-    statusCode: httpStatus.OK,
-    success: true,
-    message: 'Pending count retrieved successfully',
     data: result,
   });
 });
 
-// Get single message
-const getMessage = catchAsync(async (req, res) => {
+const getPendingCount = catchAsync(async (req, res) => {
   const { userId } = req.user;
-  const { id } = req.params;
-  
-  const result = await MessageServices.getMessageById(id, userId);
+  const result = await MessageServices.getPendingCount(userId);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Pending messages count retrieved successfully',
+    data: result,
+  });
+});
 
+const getMessageById = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { userId } = req.user;
+  const result = await MessageServices.getMessageById(id, userId);
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
@@ -56,11 +37,12 @@ const getMessage = catchAsync(async (req, res) => {
   });
 });
 
-// Create a new message
 const createMessage = catchAsync(async (req, res) => {
   const { userId } = req.user;
+  // req.file processing if attachments are uploaded via separate middleware,
+  // or req.body.attachments if pre-uploaded to cloud.
+  // Assuming req.body contains attachments metadata for now.
   const result = await MessageServices.createMessage(userId, req.body);
-
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
     success: true,
@@ -69,13 +51,10 @@ const createMessage = catchAsync(async (req, res) => {
   });
 });
 
-// Mark message as read
 const markAsRead = catchAsync(async (req, res) => {
-  const { userId } = req.user;
   const { id } = req.params;
-  
+  const { userId } = req.user;
   const result = await MessageServices.markAsRead(id, userId);
-
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
@@ -84,13 +63,10 @@ const markAsRead = catchAsync(async (req, res) => {
   });
 });
 
-// Archive message
 const archiveMessage = catchAsync(async (req, res) => {
-  const { userId } = req.user;
   const { id } = req.params;
-  
+  const { userId } = req.user;
   const result = await MessageServices.archiveMessage(id, userId);
-
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
@@ -99,11 +75,36 @@ const archiveMessage = catchAsync(async (req, res) => {
   });
 });
 
+const toggleStar = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { userId } = req.user;
+  const result = await MessageServices.toggleStar(id, userId);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Message star status updated',
+    data: result
+  });
+});
+
+const getCaseThreads = catchAsync(async (req, res) => {
+  const { caseId } = req.params;
+  const result = await MessageServices.getCaseThreads(caseId);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Case threads retrieved successfully',
+    data: result
+  });
+});
+
 export const MessageControllers = {
-  getMyMessages,
+  getMessagesForUser,
   getPendingCount,
-  getMessage,
+  getMessageById,
   createMessage,
   markAsRead,
   archiveMessage,
+  toggleStar,
+  getCaseThreads
 };

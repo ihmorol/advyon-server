@@ -6,7 +6,7 @@ const notificationSchema = new Schema<TNotification>(
     type: {
       type: String,
       required: true,
-      enum: ['alert', 'request', 'message'],
+      enum: ['alert', 'request', 'message', 'case_update', 'document_upload', 'hearing_reminder', 'deadline', 'ai_analysis_complete'],
     },
     priority: {
       type: String,
@@ -42,6 +42,18 @@ const notificationSchema = new Schema<TNotification>(
     metadata: {
       type: Schema.Types.Map,
       of: Schema.Types.Mixed,
+    },
+    // WBS-9.1: Idempotency key to prevent duplicate notifications
+    idempotencyKey: {
+      type: String,
+      index: true,
+      sparse: true,
+    },
+    // WBS-9.1: Channels this notification was sent through
+    channels: {
+      inApp: { type: Boolean, default: true },
+      email: { type: Boolean, default: false },
+      webPush: { type: Boolean, default: false },
     },
   },
   {

@@ -8,11 +8,9 @@ import config from './index';
  */
 
 const apiKey = config.gemini_api_key || '';
-console.log('Gemini API Key:', apiKey);
 
 // Initialize only if API Key exists
 export const geminiAI = apiKey ? new GoogleGenAI({ apiKey }) : null;
-console.log('Gemini AI:', geminiAI);
 
 // Model for document analysis (supports vision/multimodal)
 export const GEMINI_MODEL = 'gemini-2.0-flash';

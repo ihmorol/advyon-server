@@ -2,14 +2,22 @@ import { DocumentServices } from './document.service';
 import { DocumentModel } from './document.model';
 import { User } from '../user/user.model';
 import { Case } from '../case/case.model';
+import { CaseAccessModel } from '../caseAccess/caseAccess.model';
 import { cloudinaryUpload } from '../../config/cloudinary.config';
+import { ActivityService } from '../activity/activity.service';
 import AppError from '../../errors/appError';
 
 // Mock dependencies
 jest.mock('./document.model');
 jest.mock('../user/user.model');
 jest.mock('../case/case.model');
+jest.mock('../caseAccess/caseAccess.model');
 jest.mock('../../config/cloudinary.config');
+jest.mock('../activity/activity.service', () => ({
+  ActivityService: {
+    logActivity: jest.fn().mockResolvedValue(undefined),
+  },
+}));
 jest.mock('./document.utils', () => ({
   generateDocumentId: jest.fn().mockResolvedValue('DOC-0001'),
 }));
@@ -41,6 +49,8 @@ describe('Document Service', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (ActivityService.logActivity as jest.Mock).mockResolvedValue(undefined);
+    (CaseAccessModel.exists as jest.Mock).mockResolvedValue(false);
   });
 
   describe('uploadDocument', () => {
@@ -111,16 +121,37 @@ describe('Document Service', () => {
           id: 'DOC-0001',
           folderName: 'Evidence',
           fileName: 'doc1.pdf',
+          cloudinaryPublicId: 'public-doc-1',
+          toObject: jest.fn().mockReturnValue({
+            id: 'DOC-0001',
+            folderName: 'Evidence',
+            fileName: 'doc1.pdf',
+            cloudinaryPublicId: 'public-doc-1',
+          }),
         },
         {
           id: 'DOC-0002',
           folderName: 'Evidence',
           fileName: 'doc2.pdf',
+          cloudinaryPublicId: 'public-doc-2',
+          toObject: jest.fn().mockReturnValue({
+            id: 'DOC-0002',
+            folderName: 'Evidence',
+            fileName: 'doc2.pdf',
+            cloudinaryPublicId: 'public-doc-2',
+          }),
         },
         {
           id: 'DOC-0003',
           folderName: 'Legal Documents',
           fileName: 'doc3.pdf',
+          cloudinaryPublicId: 'public-doc-3',
+          toObject: jest.fn().mockReturnValue({
+            id: 'DOC-0003',
+            folderName: 'Legal Documents',
+            fileName: 'doc3.pdf',
+            cloudinaryPublicId: 'public-doc-3',
+          }),
         },
       ];
 
@@ -157,7 +188,7 @@ describe('Document Service', () => {
       (Case.findOne as jest.Mock).mockResolvedValue(mockCase);
       (DocumentModel.findOne as jest.Mock).mockResolvedValue(mockDocument);
       (cloudinaryUpload.uploader.destroy as jest.Mock).mockResolvedValue({});
-      (DocumentModel.findByIdAndDelete as jest.Mock).mockResolvedValue(mockDocument);
+      (DocumentModel.findByIdAndUpdate as jest.Mock).mockResolvedValue(mockDocument);
 
       const result = await DocumentServices.deleteDocument(
         'DOC-0001',
@@ -165,8 +196,7 @@ describe('Document Service', () => {
         mockUserId,
       );
 
-      expect(cloudinaryUpload.uploader.destroy).toHaveBeenCalledWith('test-public-id');
-      expect(DocumentModel.findByIdAndDelete).toHaveBeenCalled();
+      expect(DocumentModel.findByIdAndUpdate).toHaveBeenCalled();
       expect(result).toHaveProperty('message', 'Document deleted successfully');
     });
   });

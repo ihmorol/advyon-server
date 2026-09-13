@@ -17,6 +17,10 @@ import { MessageRoutes } from '../modules/message/message.route';
 import { CommunityRoutes } from '../modules/community/community.route';
 import { ScheduleRoutes } from '../modules/schedule/schedule.route';
 import { AnalyticsRoutes } from '../modules/analytics/analytics.route';
+import { SubscriptionRoutes } from '../modules/subscription/subscription.route';
+import { PaymentRoutes } from '../modules/payment/payment.route';
+import { ContactRoutes } from '../modules/contact/contact.route';
+import { ChatRoutes } from '../modules/chat/chat.route';
 
 const router = Router();
 
@@ -88,6 +92,22 @@ const moduleRoutes = [
   {
     path: '/analytics',
     route: AnalyticsRoutes,
+  },
+  {
+    path: '/subscriptions',
+    route: SubscriptionRoutes,
+  },
+  {
+    path: '/payments',
+    route: PaymentRoutes,
+  },
+  {
+    path: '/contact',
+    route: ContactRoutes,
+  },
+  {
+    path: '/chat',
+    route: ChatRoutes,
   },
 ];
 

@@ -167,3 +167,15 @@ userSchema.statics.isJWTIssuedBeforePasswordChanged = function (
 };
 
 export const User = model<TUser, UserModel>('User', userSchema);
+
+// Define indexes separately for better organization
+userSchema.index({ role: 1 });
+userSchema.index({ status: 1 });
+userSchema.index({ createdAt: -1 });
+userSchema.index({ email: 1 }, { unique: true }); // Ensure unique index
+userSchema.index({ id: 1 }, { unique: true }); // Ensure unique index
+userSchema.index({ clerkUserId: 1 }, { sparse: true, unique: true });
+
+// Compound indexes for common queries
+userSchema.index({ role: 1, status: 1 });
+userSchema.index({ createdAt: -1, isDeleted: 1 });

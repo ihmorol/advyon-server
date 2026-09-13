@@ -1,11 +1,21 @@
 import { CaseServices } from './case.service';
 import { Case } from './case.model';
 import { User } from '../user/user.model';
+import { CaseAccessModel } from '../caseAccess/caseAccess.model';
+import { DocumentModel } from '../document/document.model';
+import { ActivityService } from '../activity/activity.service';
 import AppError from '../../errors/appError';
 
 // Mock dependencies
 jest.mock('./case.model');
 jest.mock('../user/user.model');
+jest.mock('../caseAccess/caseAccess.model');
+jest.mock('../document/document.model');
+jest.mock('../activity/activity.service', () => ({
+  ActivityService: {
+    logActivity: jest.fn().mockResolvedValue(undefined),
+  },
+}));
 jest.mock('./case.utils', () => ({
   generateCaseId: jest.fn().mockResolvedValue('CS-2024-0001'),
 }));
@@ -28,6 +38,10 @@ describe('Case Service', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (CaseAccessModel.find as jest.Mock).mockReturnValue({
+      select: jest.fn().mockResolvedValue([]),
+    });
+    (ActivityService.logActivity as jest.Mock).mockResolvedValue(undefined);
   });
 
   describe('createCase', () => {
@@ -84,6 +98,31 @@ describe('Case Service', () => {
       expect(result).toHaveProperty('meta');
       expect(result.meta.total).toBe(1);
     });
+
+    it('should preserve access scope when search is provided', async () => {
+      (User.findOne as jest.Mock).mockResolvedValue(mockUser);
+      (Case.find as jest.Mock).mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([]),
+      });
+      (Case.countDocuments as jest.Mock).mockResolvedValue(0);
+
+      await CaseServices.getAllCases(mockUserId, {
+        search: 'State',
+        page: 1,
+        limit: 10,
+      });
+
+      const calledFilter = (Case.find as jest.Mock).mock.calls[0][0];
+      expect(calledFilter.$and).toBeDefined();
+      expect(calledFilter.$and[0].$or).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ createdBy: mockUser._id }),
+        ]),
+      );
+    });
   });
 
   describe('getCaseById', () => {
@@ -92,11 +131,20 @@ describe('Case Service', () => {
         id: 'CS-2024-0001',
         title: 'Test Case',
         createdBy: mockUser,
+        toObject: jest.fn().mockReturnValue({
+          id: 'CS-2024-0001',
+          title: 'Test Case',
+          createdBy: mockUser,
+        }),
       };
 
       (User.findOne as jest.Mock).mockResolvedValue(mockUser);
       (Case.findOne as jest.Mock).mockReturnValue({
         populate: jest.fn().mockResolvedValue(mockCase),
+      });
+      (DocumentModel.find as jest.Mock).mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockResolvedValue([]),
       });
 
       const result = await CaseServices.getCaseById('CS-2024-0001', mockUserId);
@@ -109,10 +157,43 @@ describe('Case Service', () => {
       (Case.findOne as jest.Mock).mockReturnValue({
         populate: jest.fn().mockResolvedValue(null),
       });
+      (DocumentModel.find as jest.Mock).mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockResolvedValue([]),
+      });
 
       await expect(
         CaseServices.getCaseById('CS-2024-0001', mockUserId),
       ).rejects.toThrow(AppError);
+    });
+
+    it('should allow access for users with shared case access', async () => {
+      const owner = { _id: '507f1f77bcf86cd799439099' };
+      const mockCase = {
+        _id: '507f1f77bcf86cd799439012',
+        id: 'CS-2024-0001',
+        title: 'Shared Case',
+        createdBy: owner,
+        clientId: null,
+        toObject: jest.fn().mockReturnValue({
+          id: 'CS-2024-0001',
+          title: 'Shared Case',
+          createdBy: owner,
+        }),
+      };
+
+      (User.findOne as jest.Mock).mockResolvedValue(mockUser);
+      (Case.findOne as jest.Mock).mockReturnValue({
+        populate: jest.fn().mockResolvedValue(mockCase),
+      });
+      (CaseAccessModel.exists as jest.Mock).mockResolvedValue(true);
+      (DocumentModel.find as jest.Mock).mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockResolvedValue([]),
+      });
+
+      const result = await CaseServices.getCaseById('CS-2024-0001', mockUserId);
+      expect(result).toHaveProperty('id', 'CS-2024-0001');
     });
   });
 

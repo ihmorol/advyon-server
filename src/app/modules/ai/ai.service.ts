@@ -1,7 +1,19 @@
 /* eslint-disable @typescript-eslint/no-var-requires */
+import { Types } from 'mongoose';
 import { groqClient, AI_MODEL as GROQ_MODEL } from '../../config/groq.config';
 import { openrouterClient, OPENROUTER_VISION_MODEL, isOpenRouterAvailable } from '../../config/openrouter.config';
 import { TAiAnalysis, TDocumentCategory } from '../document/document.interface';
+import { AIChatModel } from './ai-chat.model';
+import { OpenRouterService } from './openrouter.service';
+import { TChatHistory } from './ai.interface';
+
+const toObjectId = (value: string): Types.ObjectId => {
+  if (!Types.ObjectId.isValid(value)) {
+    throw new Error('Invalid MongoDB user identifier.');
+  }
+
+  return new Types.ObjectId(value);
+};
 
 // Valid document categories
 const VALID_CATEGORIES: TDocumentCategory[] = [
@@ -128,28 +140,124 @@ const analyzeLegalDocument = async (
 };
 
 /**
- * Chat with AI (Uses Groq - fast text chat)
+ * Chat with AI (Uses OpenRouter via OpenRouterService)
+ * Kept for backward compatibility, but delegates to OpenRouter
  */
-const chatWithAI = async (message: string, context: string, history: any[] = []): Promise<string> => {
+const chatWithAI = async (
+  message: string,
+  context: string,
+  history: any[] = [],
+  options?: { throwOnFailure?: boolean },
+): Promise<string> => {
   try {
-    const systemPrompt = `You are an expert legal assistant named Advyon AI.
-    ${context ? `CONTEXT:\n${context}` : ''}
-    Answer clearly and professionally.`;
+    const formattedHistory: TChatHistory[] = history.map(msg => ({
+        role: msg.role === 'user' ? 'user' : 'assistant',
+        content: msg.content
+    }));
 
-    const completion = await groqClient.chat.completions.create({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...history.slice(-10).map((msg: any) => ({ role: msg.role === 'user' ? 'user' as const : 'assistant' as const, content: msg.content })),
-        { role: 'user', content: message }
-      ],
-      model: GROQ_MODEL,
+    const systemContext = `You are an expert AI assistant named Advyon AI.
+    ${context ? `CONTEXT:\n${context}` : ''}
+    INSTRUCTION: Keep your answers short and precise.`;
+
+    const response = await OpenRouterService.processChat(message, formattedHistory, systemContext);
+    return response;
+  } catch (error) {
+    const reason = (error as Error)?.message || 'AI provider request failed.';
+    console.error('OpenRouter chat error:', reason);
+    if (options?.throwOnFailure !== false) {
+      throw new Error(reason);
+    }
+    return `AI provider request failed: ${reason}`;
+  }
+};
+
+// --- Persistent Chat Methods ---
+
+const createChat = async (mongoUserId: string, message: string, context?: any) => {
+    // 1. Create new chat doc
+    const chat = await AIChatModel.create({
+        userId: toObjectId(mongoUserId),
+        title: message.substring(0, 50) + (message.length > 50 ? '...' : ''),
+        messages: [{ role: 'user', content: message, timestamp: new Date() }],
+        context
     });
 
-    return completion.choices[0]?.message?.content || "I couldn't generate a response.";
-  } catch (error) {
-    console.error('Groq chat error:', error);
-    return "I'm having trouble. Please try again.";
-  }
+    // 2. Get AI response
+    // Construct system prompt with "Keeping answer short and precise"
+    const contextString = context ? JSON.stringify(context) : '';
+    const systemContext = `You are an expert AI assistant named Advyon AI.
+    ${contextString ? `CONTEXT:\n${contextString}` : ''}
+    INSTRUCTION: Keep your answers short and precise.`;
+
+    const aiResponse = await OpenRouterService.processChat(message, [], systemContext);
+
+    // 3. Save AI response
+    chat.messages.push({ role: 'assistant', content: aiResponse, timestamp: new Date() });
+    await chat.save();
+
+    return chat;
+};
+
+const continueChat = async (chatId: string, message: string, context?: any) => {
+    const chat = await AIChatModel.findById(chatId);
+    if (!chat) throw new Error('Chat not found');
+
+    // Update context if provided
+    if (context) {
+        // dynamic merge or overwrite? For now, let's assume we might want to accumulate or replace.
+        // If it's an array of items (which frontend sends), we might want to check for duplicates?
+        // Simple approach: Replace context with new context or merge?
+        // Let's assume the frontend sends the *active* context for this turn.
+        // If we want the AI to know about ALL context ever sent, we should probably merge.
+        // But for "Chat with specific context" usually means "Here is the context for this question".
+        // However, persistent chat implies context retention.
+        // Let's merge: if context has 'items', append them?
+        // For Mixed type, let's just save what we get for now, or maybe intelligent merge if it's valid structure.
+        // Safer: If context is provided, update the chat's context field.
+         chat.context = context; // Replaces previous context with the current relevant context
+    }
+
+    // Append user message
+    chat.messages.push({ role: 'user', content: message, timestamp: new Date() });
+    await chat.save();
+
+    // Prepare history for AI
+    const history: TChatHistory[] = chat.messages
+        .filter(m => m.role !== 'system')
+        .map(m => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content
+        }));
+    
+    // Context logic
+    const contextString = chat.context ? JSON.stringify(chat.context) : '';
+    const systemContext = `You are an expert AI assistant named Advyon AI.
+    ${contextString ? `CONTEXT:\n${contextString}` : ''}
+    INSTRUCTION: Keep your answers short and precise.`;
+
+    // Exclude the last message (current user message) from history passed to processChat, 
+    // because processChat appends the message argument to history.
+    const pastHistory = history.slice(0, -1); 
+
+    const aiResponse = await OpenRouterService.processChat(message, pastHistory, systemContext);
+
+    // Append AI message
+    chat.messages.push({ role: 'assistant', content: aiResponse, timestamp: new Date() });
+    await chat.save();
+
+    return chat;
+};
+
+const getUserChats = async (mongoUserId: string) => {
+    return AIChatModel.find({ userId: toObjectId(mongoUserId) }).sort({ updatedAt: -1 }).select('title updatedAt createdAt');
+};
+
+const getChat = async (chatId: string) => {
+    return AIChatModel.findById(chatId);
+};
+
+const deleteChat = async (chatId: string) => {
+    return AIChatModel.findByIdAndDelete(chatId);
 };
 
 export const AIService = {
@@ -157,4 +265,9 @@ export const AIService = {
   analyzeWithOpenRouter,
   chatWithAI,
   isOpenRouterAvailable,
+  createChat,
+  continueChat,
+  getUserChats,
+  getChat,
+  deleteChat
 };

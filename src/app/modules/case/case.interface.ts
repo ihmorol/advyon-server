@@ -30,6 +30,12 @@ export interface TCase extends Document {
   folders: TCaseFolder[];
   isDeleted: boolean;
   deletedAt?: Date;
+  archivedAt?: Date;
+  archivedBy?: Types.ObjectId;
+  autoArchiveScheduled?: boolean;
+  permanentDeleteAt?: Date;
+  clientId?: Types.ObjectId;
+  templateId?: string;
   createdAt: Date;
 
   updatedAt: Date;
@@ -45,6 +51,7 @@ export interface TCreateCasePayload {
   nextDeadline?: Date;
   nextDeadlineDescription?: string;
   folders?: TCaseFolder[];
+  templateId?: string;
 }
 
 // Update case payload

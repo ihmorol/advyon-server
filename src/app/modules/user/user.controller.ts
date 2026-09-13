@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import catchAsync from '../../utils/catchAsync';
 import sendResponse from '../../utils/sendResponse';
 import { UserServices } from './user.service';
+import { PersonalizationService } from './personalization.service';
 
 const createUser = catchAsync(async (req, res) => {
   const result = await UserServices.createUser(req.file, req.body);
@@ -59,7 +60,7 @@ const deleteUser = catchAsync(async (req, res) => {
 
 const getMyProfile = catchAsync(async (req, res) => {
   const { userId } = req.user;
-  const result = await UserServices.getSingleUser(userId);
+  const result = await UserServices.getMyProfile(userId);
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
@@ -108,7 +109,7 @@ const updateMyProfile = catchAsync(async (req, res) => {
 const changePassword = catchAsync(async (req, res) => {
   const { userId } = req.user;
   const { currentPassword, newPassword } = req.body;
-  
+
   if (!currentPassword || !newPassword) {
     sendResponse(res, {
       statusCode: httpStatus.BAD_REQUEST,
@@ -118,7 +119,7 @@ const changePassword = catchAsync(async (req, res) => {
     });
     return;
   }
-  
+
   const result = await UserServices.changePassword(userId, currentPassword, newPassword);
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -140,6 +141,88 @@ const getLawyerClients = catchAsync(async (req, res) => {
   });
 });
 
+// WBS-7.1: Get Client Detail
+const getClientDetail = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const result = await UserServices.getClientDetail(id);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Client details retrieved successfully',
+    data: result,
+  });
+});
+
+// WBS-7.1: Archive Client
+const archiveClient = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const result = await UserServices.archiveClient(id);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Client archived successfully',
+    data: result,
+  });
+});
+
+// WBS-4.1: Get personalization data
+const getPersonalization = catchAsync(async (req, res) => {
+  const { userId } = req.user;
+  const result = await PersonalizationService.getPersonalization(userId);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Personalization data retrieved successfully',
+    data: result,
+  });
+});
+
+// WBS-4.1: Update personalization preferences
+const updatePersonalization = catchAsync(async (req, res) => {
+  const { userId } = req.user;
+  const result = await PersonalizationService.updatePersonalization(userId, req.body);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Personalization updated successfully',
+    data: result,
+  });
+});
+
+// WBS-4.1: Track behavior event (async, non-blocking)
+const trackBehavior = catchAsync(async (req, res) => {
+  const { userId } = req.user;
+  const result = await PersonalizationService.trackBehavior(userId, req.body);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Behavior tracked',
+    data: result,
+  });
+});
+
+// Lawyer Directory: Get all lawyers with profiles
+const getAllLawyers = catchAsync(async (req, res) => {
+  const result = await UserServices.getAllLawyers(req.query);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Lawyers retrieved successfully',
+    data: result,
+  });
+});
+
+const submitVerificationRequest = catchAsync(async (req, res) => {
+  const { userId } = req.user;
+  const result = await UserServices.submitVerificationRequest(userId, req.body);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Verification request submitted successfully',
+    data: result,
+  });
+});
+
 export const UserControllers = {
   createUser,
   getAllUsers,
@@ -152,5 +235,11 @@ export const UserControllers = {
   updateMyProfile,
   changePassword,
   getLawyerClients,
+  getClientDetail,
+  archiveClient,
+  getPersonalization,
+  updatePersonalization,
+  trackBehavior,
+  getAllLawyers,
+  submitVerificationRequest,
 };
-

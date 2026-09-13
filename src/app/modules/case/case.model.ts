@@ -74,6 +74,27 @@ const caseSchema = new Schema<TCase>(
     deletedAt: {
       type: Date,
     },
+    archivedAt: {
+      type: Date,
+    },
+    archivedBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    autoArchiveScheduled: {
+      type: Boolean,
+      default: false,
+    },
+    permanentDeleteAt: {
+      type: Date,
+    },
+    clientId: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    templateId: {
+      type: String,
+    },
   },
   {
     timestamps: true,
@@ -85,6 +106,8 @@ caseSchema.index({ caseNumber: 1 });
 caseSchema.index({ status: 1 });
 caseSchema.index({ createdBy: 1 });
 caseSchema.index({ isDeleted: 1 });
+caseSchema.index({ archivedAt: 1 });
+caseSchema.index({ status: 1, archivedAt: 1 });
 
 // Query middleware to exclude deleted cases by default
 caseSchema.pre('find', function (next) {

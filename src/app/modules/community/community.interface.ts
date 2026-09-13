@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { TModerationSnapshot } from './community.moderation.interface';
 
 export type TCategory = 'Family Law' | 'Criminal Defense' | 'Civil Litigation' | 'Property Law' | 'Corporate' | 'Intellectual Property' | 'Others';
 
@@ -10,6 +11,8 @@ export interface TReply {
     upvotes: Types.ObjectId[];
     downvotes: Types.ObjectId[];
     isAcceptedAnswer: boolean;
+    isVisible?: boolean;
+    moderation?: TModerationSnapshot;
     createdAt?: Date;
     updatedAt?: Date;
 }
@@ -27,6 +30,8 @@ export interface TThread {
     isSolved: boolean;
     upvotesCount: number;
     repliesCount: number;
+    isVisible?: boolean;
+    moderation?: TModerationSnapshot;
     createdAt?: Date;
     updatedAt?: Date;
 }

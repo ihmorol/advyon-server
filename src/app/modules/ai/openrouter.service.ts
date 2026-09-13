@@ -1,5 +1,4 @@
-import httpStatus from 'http-status';
-import { openRouterConfig, OPENROUTER_MODEL } from '../../config/openrouter.config';
+import { OPENROUTER_MODEL, openrouterClient } from '../../config/openrouter.config';
 import { TAiAnalysis, TDocumentCategory } from '../document/document.interface';
 import { TChatHistory } from './ai.interface';
 
@@ -31,30 +30,45 @@ const DEFAULT_AI_ANALYSIS: TAiAnalysis = {
   modelVersion: OPENROUTER_MODEL,
 };
 
-// Singleton instance holder
-let openRouterClient: any = null;
-
-/**
- * Dynamically import and initialize the OpenRouter client
- * This is needed because @openrouter/sdk is an ES Module and we are in a CommonJS environment
- */
-const getOpenRouterClient = async () => {
-  if (openRouterClient) return openRouterClient;
-
-  try {
-    // Dynamic import - using eval to bypass TypeScript compiling to require()
-    // This is necessary because the project is CJS but the SDK is ESM-only
-    const { OpenRouter } = await (eval('import("@openrouter/sdk")') as Promise<any>);
-    
-    openRouterClient = new OpenRouter({
-      apiKey: openRouterConfig.apiKey,
-    });
-
-    return openRouterClient;
-  } catch (error) {
-    console.error('Failed to initialize OpenRouter client:', error);
-    throw new Error('AI Service Unavailable: Failed to load OpenRouter SDK');
+const getClientOrThrow = () => {
+  if (!openrouterClient) {
+    throw new Error('OpenRouter is not configured. Set OPENROUTER_API_KEY.');
   }
+
+  return openrouterClient;
+};
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === 'string') {
+    return error;
+  }
+
+  return 'Failed to process chat message';
+};
+
+const extractTextContent = (content: unknown): string => {
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+
+  if (!Array.isArray(content)) {
+    return '';
+  }
+
+  const text = content
+    .map((item: any) => {
+      if (typeof item === 'string') return item;
+      if (item?.type === 'text' && typeof item.text === 'string') return item.text;
+      return '';
+    })
+    .join('')
+    .trim();
+
+  return text;
 };
 
 /**
@@ -100,9 +114,9 @@ ${truncatedText}
 JSON RESPONSE:`;
 
   try {
-    const client = await getOpenRouterClient();
-    
-    const completion = await client.chat.send({
+    const client = getClientOrThrow();
+
+    const completion = await client.chat.completions.create({
       model: OPENROUTER_MODEL,
       messages: [
         {
@@ -111,15 +125,9 @@ JSON RESPONSE:`;
         },
       ],
       stream: false,
-    }); // Currently using send which might return a non-promise or completion directly depending on SDK
-    
-    // Note: The @openrouter/sdk chat.send return type might be different or promise-based. 
-    // Usually it returns a promise resolving to the completion object.
-    
-    // If specific casting is needed due to beta SDK:
-    const response = completion as any; 
-    
-    const responseText = response.choices?.[0]?.message?.content || '';
+    });
+
+    const responseText = extractTextContent(completion.choices?.[0]?.message?.content) || '{}';
 
     // Bulletproof JSON cleaning - remove all markdown formatting
     let cleanedResponse = responseText
@@ -166,14 +174,15 @@ JSON RESPONSE:`;
     return analysis;
   } catch (error) {
     // Log the error for debugging
-    console.error('OpenRouter AI analysis error:', error);
+    const reason = getErrorMessage(error);
+    console.error('OpenRouter AI analysis error:', reason);
 
     // Return fallback object instead of throwing
     return {
       ...DEFAULT_AI_ANALYSIS,
       summary: error instanceof SyntaxError
           ? 'Failed to parse AI response. Document may require manual review.'
-          : 'AI analysis encountered an error. Please try again later.',
+          : `AI analysis encountered an error: ${reason}`,
       rawSummary: '',
     };
   }
@@ -213,20 +222,25 @@ const processChat = async (message: string, history: TChatHistory[], context?: s
             content: message
         });
 
-        const client = await getOpenRouterClient();
+        const client = getClientOrThrow();
 
-        const completion = await client.chat.send({
+        const completion = await client.chat.completions.create({
             model: OPENROUTER_MODEL,
             messages: messages,
             stream: false
         });
 
-        const response = completion as any;
-        return response.choices?.[0]?.message?.content || 'No response generated.';
+        const responseText = extractTextContent(completion.choices?.[0]?.message?.content);
+        if (responseText) {
+          return responseText;
+        }
+
+        return 'No response generated.';
 
     } catch (error) {
-        console.error('OpenRouter Chat error:', error);
-        throw new Error('Failed to process chat message');
+        const reason = getErrorMessage(error);
+        console.error('OpenRouter Chat error:', reason);
+        throw new Error(reason);
     }
 }
 

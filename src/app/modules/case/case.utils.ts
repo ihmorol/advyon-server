@@ -27,6 +27,57 @@ export const generateCaseId = async (): Promise<string> => {
 };
 
 /**
+ * Generate unique case number
+ * Format: ADV-YYYY-XXXXXX (e.g., ADV-2024-000001)
+ * Uses atomic counter approach with retry logic for conflict prevention
+ */
+export const generateCaseNumber = async (): Promise<string> => {
+  const currentYear = new Date().getFullYear();
+  const prefix = `ADV-${currentYear}`;
+  const maxRetries = 5;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    // Find the latest case number for the current year using caseNumber field
+    const latestCase = await Case.findOne({
+      caseNumber: new RegExp(`^${prefix}-`),
+    })
+      .sort({ caseNumber: -1 })
+      .select('caseNumber')
+      .lean();
+
+    let nextNumber: number;
+
+    if (!latestCase) {
+      nextNumber = 1;
+    } else {
+      // Extract the number part and increment
+      const parts = latestCase.caseNumber.split('-');
+      const lastNumber = parseInt(parts[2], 10);
+      nextNumber = lastNumber + 1;
+    }
+
+    // Generate the case number
+    const caseNumber = `${prefix}-${nextNumber.toString().padStart(6, '0')}`;
+
+    // Verify uniqueness before returning (defensive check)
+    const existingCase = await Case.findOne({ caseNumber }).select('caseNumber').lean();
+
+    if (!existingCase) {
+      return caseNumber;
+    }
+
+    // If conflict exists, retry with a random offset to reduce collision probability
+    if (attempt < maxRetries - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)));
+    }
+  }
+
+  // Fallback: use timestamp for guaranteed uniqueness
+  const timestamp = Date.now().toString().slice(-6);
+  return `${prefix}-${timestamp}`;
+};
+
+/**
  * Calculate case progress based on various factors
  * This is a placeholder - can be enhanced with more complex logic
  */

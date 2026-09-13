@@ -31,10 +31,18 @@ export const uploadBufferToCloudinary = (
     folder?: string;
     publicIdPrefix?: string;
     resourceType?: 'auto' | 'image' | 'video' | 'raw';
+    accessMode?: 'public' | 'authenticated';
   } = {},
 ): Promise<CloudinaryUploadResult> => {
   return new Promise((resolve, reject) => {
-    const { folder = 'documents', publicIdPrefix, resourceType = 'auto' } = options;
+    const {
+      folder = 'documents',
+      publicIdPrefix,
+      resourceType = 'auto',
+      accessMode = 'authenticated',
+    } = options;
+
+    const deliveryType = accessMode === 'authenticated' ? 'authenticated' : 'upload';
 
     // Generate unique public ID
     const timestamp = Date.now();
@@ -48,6 +56,8 @@ export const uploadBufferToCloudinary = (
         folder,
         public_id: publicId,
         resource_type: resourceType,
+        type: deliveryType,
+        access_mode: accessMode,
       },
       (error, result) => {
         if (error) {
@@ -89,9 +99,17 @@ export const uploadFileToCloudinary = async (
     folder?: string;
     publicIdPrefix?: string;
     resourceType?: 'auto' | 'image' | 'video' | 'raw';
+    accessMode?: 'public' | 'authenticated';
   } = {},
 ): Promise<CloudinaryUploadResult> => {
-  const { folder = 'documents', publicIdPrefix, resourceType = 'auto' } = options;
+  const {
+    folder = 'documents',
+    publicIdPrefix,
+    resourceType = 'auto',
+    accessMode = 'authenticated',
+  } = options;
+
+  const deliveryType = accessMode === 'authenticated' ? 'authenticated' : 'upload';
 
   // Generate unique public ID
   const timestamp = Date.now();
@@ -104,6 +122,8 @@ export const uploadFileToCloudinary = async (
     folder,
     public_id: publicId,
     resource_type: resourceType,
+    type: deliveryType,
+    access_mode: accessMode,
   });
 
   return {
@@ -135,15 +155,111 @@ export const deleteFromCloudinary = async (
  * @param publicId - Cloudinary public ID
  * @param expiresInSeconds - URL expiration time in seconds
  */
+export type CloudinaryResourceType = 'image' | 'video' | 'raw';
+export type CloudinaryDeliveryType = 'upload' | 'authenticated';
+
+export const resolveResourceTypeFromMime = (
+  mimeType?: string,
+): CloudinaryResourceType => {
+  if (!mimeType) return 'raw';
+  const normalized = mimeType.toLowerCase();
+
+  // Images (excluding PDFs - PDFs should be 'raw')
+  if (normalized.startsWith('image/') && normalized !== 'application/pdf') return 'image';
+
+  // Video and audio (Cloudinary stores audio under video resource type)
+  if (normalized.startsWith('video/') || normalized.startsWith('audio/')) {
+    return 'video';
+  }
+
+  // PDFs should be 'raw' for proper handling
+  if (normalized === 'application/pdf') return 'raw';
+
+  // Document types should be 'raw'
+  const documentTypes = [
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument',
+    'application/vnd.ms-excel',
+    'application/vnd.ms-powerpoint',
+    'text/plain',
+    'application/rtf',
+  ];
+
+  if (documentTypes.some(type => normalized.includes(type))) return 'raw';
+
+  // Extension-based fallback for when only extension is provided
+  if (!normalized.includes('/')) {
+    const extension = normalized.replace('.', '');
+    const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'];
+    const videoExts = ['mp4', 'mov', 'avi', 'mkv', 'mp3', 'wav', 'm4a'];
+    const rawExts = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'rtf'];
+
+    if (imageExts.includes(extension)) return 'image';
+    if (videoExts.includes(extension)) return 'video';
+    if (rawExts.includes(extension)) return 'raw';
+  }
+
+  return 'raw';
+};
+
+export const resolveResourceTypeFromUrl = (
+  url?: string,
+  fallback: CloudinaryResourceType = 'raw',
+): CloudinaryResourceType => {
+  if (!url) return fallback;
+  if (url.includes('/image/')) return 'image';
+  if (url.includes('/video/')) return 'video';
+  if (url.includes('/raw/')) return 'raw';
+  return fallback;
+};
+
+export const resolveDeliveryTypeFromUrl = (
+  url?: string,
+  fallback: CloudinaryDeliveryType = 'authenticated',
+): CloudinaryDeliveryType => {
+  if (!url) return fallback;
+  if (url.includes('/authenticated/')) {
+    return 'authenticated';
+  }
+  if (url.includes('/upload/')) {
+    return 'upload';
+  }
+  return fallback;
+};
+
 export const getSignedUrl = (
   publicId: string,
-  expiresInSeconds: number = 3600,
+  options: {
+    expiresInSeconds?: number;
+    resourceType?: CloudinaryResourceType;
+    deliveryType?: CloudinaryDeliveryType;
+    attachmentFilename?: string;
+    inline?: boolean;
+  } = {},
 ): string => {
+  const {
+    expiresInSeconds = 3600,
+    resourceType = 'raw',
+    deliveryType = 'authenticated',
+    attachmentFilename,
+    inline = false,
+  } = options;
+
   const expirationTimestamp = Math.floor(Date.now() / 1000) + expiresInSeconds;
-  
-  return cloudinary.url(publicId, {
+
+  const urlOptions: Record<string, unknown> = {
     sign_url: true,
-    type: 'authenticated',
+    type: deliveryType,
+    resource_type: resourceType,
     expires_at: expirationTimestamp,
-  });
+  };
+
+  if (attachmentFilename) {
+    urlOptions.attachment = attachmentFilename;
+  } else if (inline) {
+    // Force inline display instead of attachment for viewing
+    urlOptions.flags = 'inline';
+  }
+
+  return cloudinary.url(publicId, urlOptions);
 };

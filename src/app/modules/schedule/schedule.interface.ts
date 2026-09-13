@@ -11,19 +11,31 @@ export interface ISchedule {
   startTime: string; // HH:mm
   endTime: string;   // HH:mm
   location?: string;
-  
+
   caseId: Types.ObjectId;
   participants: Types.ObjectId[]; // User IDs (lawyers, clients)
   createdBy: Types.ObjectId;
-  
+
   status: TEventStatus;
-  
+
   reminders: {
     time: number; // minutes before
     sent: boolean;
   }[];
-  
+
   metadata?: Record<string, any>;
+
+  // WBS-6.1 additions
+  recurrence?: {
+    frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
+    interval: number;
+    endDate?: Date;
+    daysOfWeek?: number[];
+  };
+  parentEventId?: Types.ObjectId;
+  resourceId?: string;
+  googleCalendarEventId?: string; // BL: needs Google credentials
+
   createdAt: Date;
   updatedAt: Date;
 }

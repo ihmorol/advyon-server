@@ -57,7 +57,8 @@ export interface TDocument extends Document {
   caseId: Types.ObjectId;
   folderName: string;
   fileName: string;
-  fileType: string;
+  fileType: string; // file extension (e.g., 'pdf', 'docx')
+  mimeType: string; // full MIME type (e.g., 'application/pdf')
   fileSize: number;
   cloudinaryUrl: string;
   cloudinaryPublicId: string;
@@ -94,6 +95,10 @@ export interface TDocument extends Document {
   // Soft delete
   isDeleted: boolean;
   deletedAt: Date | null;
+
+  // Archive status
+  status: 'active' | 'archived';
+  archivedAt?: Date | null;
 }
 
 // Upload document payload
@@ -118,6 +123,7 @@ export interface TDocumentQuery {
   folder?: string;
   documentId?: string;
   processingStatus?: TDocumentProcessingStatus;
+  status?: 'active' | 'archived';
 }
 
 // Grouped documents by folder

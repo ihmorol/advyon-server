@@ -26,9 +26,19 @@ router.get('/my-documents', auth(), DocumentControllers.getAllDocuments);
  * Get document content (viewer)
  */
 router.get(
-    '/:documentId/content',
-    auth(),
-    DocumentControllers.getDocumentContent
+  '/:documentId/content',
+  auth(),
+  DocumentControllers.getDocumentContent
+);
+
+/**
+ * GET /documents/:documentId/view
+ * Proxy document for inline viewing (solves Cloudinary attachment issue)
+ */
+router.get(
+  '/:documentId/view',
+  auth(),
+  DocumentControllers.viewDocument
 );
 
 /**
@@ -36,9 +46,9 @@ router.get(
  * Update document summary
  */
 router.put(
-    '/:documentId/summary',
-    auth(),
-    DocumentControllers.updateDocumentSummary
+  '/:documentId/summary',
+  auth(),
+  DocumentControllers.updateDocumentSummary
 );
 
 /**
@@ -78,11 +88,29 @@ router.post(
 );
 
 /**
+ * PATCH /documents/:documentId/archive
+ * Archive a document
+ */
+router.patch('/:documentId/archive', auth(), DocumentControllers.archiveDocument);
+
+/**
+ * PATCH /documents/:documentId/restore
+ * Restore/Unarchive a document
+ */
+router.patch('/:documentId/restore', auth(), DocumentControllers.restoreDocument);
+
+/**
  * DELETE /documents/:caseId/:documentId
  * Delete a document
  * Requires authentication
  */
 router.delete('/:caseId/:documentId', auth(), DocumentControllers.deleteDocument);
 router.get('/:caseId/:documentId/download', auth('admin', 'superAdmin', 'lawyer', 'client'), DocumentControllers.downloadDocument);
+
+/**
+ * POST /documents/batch-download
+ * WBS-5.5: Batch download — returns download URLs for multiple documents
+ */
+router.post('/batch-download', auth('admin', 'superAdmin', 'lawyer', 'client'), DocumentControllers.batchDownload);
 
 export const DocumentRoutes = router;

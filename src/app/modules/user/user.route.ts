@@ -44,6 +44,7 @@ const router = express.Router();
  */
 router.post(
   '/create-user',
+  auth('admin', 'superAdmin'),
   validateRequest(UserValidation.createUserValidationSchema),
   UserControllers.createUser,
 );
@@ -138,8 +139,51 @@ router.get(
  */
 router.get(
   '/my-clients',
-  auth('lawyer'),
+  auth('lawyer', 'admin', 'superAdmin'),
   UserControllers.getLawyerClients,
+);
+
+/**
+ * @swagger
+ * /users/clients/{id}:
+ *   get:
+ *     summary: Get client details (Lawyer only)
+ *     description: Retrieves detailed client info, associated cases, and billing stats.
+ *     tags: [Users]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Client details retrieved
+ */
+router.get(
+  '/clients/:id',
+  auth('lawyer', 'admin', 'superAdmin'),
+  UserControllers.getClientDetail
+);
+
+/**
+ * @swagger
+ * /users/clients/{id}:
+ *   delete:
+ *     summary: Archive client (Lawyer only)
+ *     tags: [Users]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Client archived
+ */
+router.delete(
+  '/clients/:id',
+  auth('lawyer', 'admin', 'superAdmin'),
+  UserControllers.archiveClient
 );
 
 /**
@@ -180,6 +224,35 @@ router.patch(
   '/me/profile',
   auth(),
   UserControllers.updateMyProfile,
+);
+
+/**
+ * @swagger
+ * /users/lawyer/verify-request:
+ *   post:
+ *     summary: Submit lawyer verification request
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               barRegistrationNumber:
+ *                 type: string
+ *               barCouncilName:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Verification submitted
+ */
+router.post(
+  '/lawyer/verify-request',
+  auth('lawyer'),
+  UserControllers.submitVerificationRequest,
 );
 
 /**
@@ -263,6 +336,57 @@ router.patch(
   UserControllers.updateMyPreferences,
 );
 
+// WBS-4.1: Personalization routes
+router.get(
+  '/me/personalization',
+  auth(),
+  UserControllers.getPersonalization,
+);
+
+router.put(
+  '/me/personalization',
+  auth(),
+  UserControllers.updatePersonalization,
+);
+
+router.post(
+  '/me/behavior',
+  auth(),
+  UserControllers.trackBehavior,
+);
+
+/**
+ * @swagger
+ * /users/lawyers:
+ *   get:
+ *     summary: Get all lawyers (Lawyer Directory)
+ *     description: Retrieves a list of lawyers with their profiles for the lawyer directory. Supports search, practiceArea filter, and pagination.
+ *     tags: [Users]
+ *     parameters:
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Search by lawyer name
+ *       - in: query
+ *         name: practiceArea
+ *         schema: { type: string }
+ *         description: Filter by practice area
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 12 }
+ *     responses:
+ *       200:
+ *         description: Lawyers retrieved successfully
+ */
+router.get(
+  '/lawyers',
+  auth(),
+  UserControllers.getAllLawyers,
+);
+
 /**
  * @swagger
  * /users:
@@ -276,6 +400,8 @@ router.patch(
  */
 router.get(
   '/',
+  auth('admin', 'superAdmin'),
+  validateRequest(UserValidation.queryUserValidation),
   UserControllers.getAllUsers,
 );
 
@@ -301,6 +427,7 @@ router.get(
  */
 router.get(
   '/:id',
+  auth(),
   UserControllers.getSingleUser,
 );
 
@@ -335,6 +462,7 @@ router.get(
  */
 router.patch(
   '/:id',
+  auth('admin', 'superAdmin'),
   validateRequest(UserValidation.updateUserValidationSchema),
   UserControllers.updateUser,
 );
@@ -359,6 +487,7 @@ router.patch(
  */
 router.delete(
   '/:id',
+  auth('admin', 'superAdmin'),
   UserControllers.deleteUser,
 );
 

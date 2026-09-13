@@ -1,7 +1,8 @@
 import { UploadApiResponse, v2 as cloudinary } from 'cloudinary';
 import fs from 'fs';
-import multer from 'multer';
+import multer, { StorageEngine, FileFilterCallback } from 'multer';
 import config from '../config';
+import { Request } from 'express';
 
 cloudinary.config({
   cloud_name: config.cloudinary_cloud_name,
@@ -35,11 +36,19 @@ export const sendImageToCloudinary = (
   });
 };
 
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
+const storage: StorageEngine = multer.diskStorage({
+  destination: function (
+    _req: Request,
+    _file: Express.Multer.File,
+    cb: (error: Error | null, destination: string) => void
+  ) {
     cb(null, process.cwd() + '/uploads/');
   },
-  filename: function (req, file, cb) {
+  filename: function (
+    _req: Request,
+    file: Express.Multer.File,
+    cb: (error: Error | null, filename: string) => void
+  ) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     cb(null, file.fieldname + '-' + uniqueSuffix);
   },

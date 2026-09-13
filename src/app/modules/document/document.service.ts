@@ -3,6 +3,7 @@ import httpStatus from 'http-status';
 import AppError from '../../errors/appError';
 import { User } from '../user/user.model';
 import { Case } from '../case/case.model';
+import { CaseAccessModel } from '../caseAccess/caseAccess.model';
 import mongoose from 'mongoose';
 import { DocumentModel } from './document.model';
 import {
@@ -11,8 +12,24 @@ import {
   TInitiateDocumentPayload,
 } from './document.interface';
 import { generateDocumentId } from './document.utils';
-import { cloudinaryUpload } from '../../config/cloudinary.config';
 import { ActivityService } from '../activity/activity.service';
+import {
+  getSignedUrl,
+  resolveResourceTypeFromMime,
+  resolveResourceTypeFromUrl,
+  resolveDeliveryTypeFromUrl,
+} from '../../utils/file.upload.utils';
+import path from 'path';
+
+const ensureFileNameHasExtension = (fileName: string, mimeType?: string) => {
+  const ext = path.extname(fileName);
+  if (ext) return fileName;
+  if (!mimeType) return fileName;
+
+  const inferredExt = mimeType.split('/').pop();
+  if (!inferredExt) return fileName;
+  return `${fileName}.${inferredExt}`;
+};
 
 /**
  * Upload a document to a case
@@ -28,13 +45,13 @@ const uploadDocument = async (
   if (!user) {
     throw new AppError(httpStatus.NOT_FOUND, 'User not found');
   }
-  
+
   // Verify case exists and user owns it
   let caseData;
   if (mongoose.Types.ObjectId.isValid(caseId)) {
     caseData = await Case.findById(caseId);
   }
-  
+
   if (!caseData) {
     caseData = await Case.findOne({ id: caseId });
   }
@@ -56,13 +73,19 @@ const uploadDocument = async (
   // Extract file info from Cloudinary upload
   const fileType = file.mimetype.split('/')[1];
 
+  const normalizedFileName = ensureFileNameHasExtension(
+    file.originalname,
+    file.mimetype,
+  );
+
   // Create document record
   const document = await DocumentModel.create({
     id: documentId,
     caseId: caseData._id,
     folderName,
-    fileName: file.originalname,
-    fileType,
+    fileName: normalizedFileName,
+    fileType, // file extension
+    mimeType: file.mimetype, // full MIME type for proper resource type resolution
     fileSize: file.size,
     cloudinaryUrl: (file as any).path, // Cloudinary URL
     cloudinaryPublicId: (file as any).filename, // Cloudinary public ID
@@ -99,21 +122,42 @@ const getDocumentsByCase = async (
     throw new AppError(httpStatus.NOT_FOUND, 'User not found');
   }
 
-  // Verify case exists and user owns it
-  const caseData = await Case.findOne({ id: caseId });
+  // Verify case exists
+  let caseData = null;
+  if (mongoose.Types.ObjectId.isValid(caseId)) {
+    caseData = await Case.findById(caseId);
+  }
+
+  if (!caseData) {
+    caseData = await Case.findOne({ id: caseId });
+  }
+
   if (!caseData) {
     throw new AppError(httpStatus.NOT_FOUND, 'Case not found');
   }
 
-  if (caseData.createdBy.toString() !== user._id.toString()) {
+  const isOwner = caseData.createdBy.toString() === user._id.toString();
+  const isPrimaryClient = caseData.clientId?.toString() === user._id.toString();
+  const hasSharedAccess = await CaseAccessModel.exists({
+    caseId: caseData._id,
+    userId: user._id,
+    status: 'active',
+  });
+  const isPrivileged = user.role === 'admin' || user.role === 'superAdmin';
+
+  if (!isOwner && !isPrimaryClient && !hasSharedAccess && !isPrivileged) {
     throw new AppError(
       httpStatus.FORBIDDEN,
       'You are not authorized to access documents for this case',
     );
   }
 
-  // Build filter - exclude soft-deleted documents
-  const filter: any = { caseId: caseData._id, isDeleted: { $ne: true } };
+  // Build filter - exclude soft-deleted and archived documents by default unless requested
+  const filter: any = {
+    caseId: caseData._id,
+    isDeleted: { $ne: true },
+    status: query.status === 'archived' ? 'archived' : { $ne: 'archived' },
+  };
 
   if (query.folder) {
     filter.folderName = query.folder;
@@ -124,10 +168,31 @@ const getDocumentsByCase = async (
     .populate('uploadedBy', 'id fullName email')
     .sort({ uploadedAt: -1 });
 
+  // Process documents to sign URLs
+  const processedDocuments = documents.map((doc) => {
+    const docObj = doc.toObject();
+    if (docObj.cloudinaryPublicId) {
+      try {
+        // Use stored mimeType if available, fall back to URL parsing for legacy documents
+        const resourceType = docObj.mimeType
+          ? resolveResourceTypeFromMime(docObj.mimeType)
+          : resolveResourceTypeFromUrl(docObj.cloudinaryUrl);
+        const deliveryType = resolveDeliveryTypeFromUrl(docObj.cloudinaryUrl);
+        docObj.cloudinaryUrl = getSignedUrl(docObj.cloudinaryPublicId, {
+          resourceType,
+          deliveryType,
+        });
+      } catch (err) {
+        console.error(`Failed to sign URL for doc ${doc.id}:`, err);
+      }
+    }
+    return docObj;
+  });
+
   // Group documents by folder
   const groupedDocuments: TGroupedDocuments = {};
 
-  documents.forEach((doc) => {
+  processedDocuments.forEach((doc) => {
     if (!groupedDocuments[doc.folderName]) {
       groupedDocuments[doc.folderName] = [];
     }
@@ -135,7 +200,7 @@ const getDocumentsByCase = async (
   });
 
   return {
-    documents,
+    documents: processedDocuments,
     groupedByFolder: groupedDocuments,
     total: documents.length,
   };
@@ -197,6 +262,70 @@ const deleteDocument = async (
 };
 
 /**
+ * Archive a document (soft-archive: set status to 'archived')
+ */
+const archiveDocument = async (
+  documentId: string,
+  userId: string,
+) => {
+  // Verify user exists
+  const user = await User.findOne({ id: userId });
+  if (!user) {
+    throw new AppError(httpStatus.NOT_FOUND, 'User not found');
+  }
+
+  // Find document
+  const document = await DocumentModel.findOne({ id: documentId, isDeleted: { $ne: true } });
+  if (!document) {
+    throw new AppError(httpStatus.NOT_FOUND, 'Document not found');
+  }
+
+  // Only uploader can archive
+  if (document.uploadedBy.toString() !== user._id.toString() && document.uploaderId?.toString() !== user._id.toString()) {
+    throw new AppError(httpStatus.FORBIDDEN, 'You are not authorized to archive this document');
+  }
+
+  await DocumentModel.findByIdAndUpdate(document._id, {
+    status: 'archived',
+    archivedAt: new Date(),
+  });
+
+  return { message: 'Document archived successfully' };
+};
+
+/**
+ * Restore/Unarchive a document (set status back to 'active')
+ */
+const restoreDocument = async (
+  documentId: string,
+  userId: string,
+) => {
+  // Verify user exists
+  const user = await User.findOne({ id: userId });
+  if (!user) {
+    throw new AppError(httpStatus.NOT_FOUND, 'User not found');
+  }
+
+  // Find document
+  const document = await DocumentModel.findOne({ id: documentId, isDeleted: { $ne: true } });
+  if (!document) {
+    throw new AppError(httpStatus.NOT_FOUND, 'Document not found');
+  }
+
+  // Only uploader can restore
+  if (document.uploadedBy.toString() !== user._id.toString() && document.uploaderId?.toString() !== user._id.toString()) {
+    throw new AppError(httpStatus.FORBIDDEN, 'You are not authorized to restore this document');
+  }
+
+  await DocumentModel.findByIdAndUpdate(document._id, {
+    status: 'active',
+    archivedAt: null,
+  });
+
+  return { message: 'Document restored successfully' };
+};
+
+/**
  * Initiate document upload - creates initial DB record with 'pending' status
  * This is the first step in the Smart Document Intake pipeline
  * @param payload - Document metadata for initial record
@@ -209,11 +338,11 @@ const initiateDocumentUpload = async (payload: TInitiateDocumentPayload) => {
   // Verify user exists
   let user;
   if (mongoose.Types.ObjectId.isValid(uploaderId)) {
-      user = await User.findById(uploaderId);
+    user = await User.findById(uploaderId);
   }
-  
+
   if (!user) {
-      user = await User.findOne({ id: uploaderId });
+    user = await User.findOne({ id: uploaderId });
   }
 
   if (!user) {
@@ -225,7 +354,7 @@ const initiateDocumentUpload = async (payload: TInitiateDocumentPayload) => {
   if (mongoose.Types.ObjectId.isValid(caseId)) {
     caseData = await Case.findById(caseId);
   }
-  
+
   if (!caseData) {
     caseData = await Case.findOne({ id: caseId });
   }
@@ -244,13 +373,16 @@ const initiateDocumentUpload = async (payload: TInitiateDocumentPayload) => {
   // Generate document ID
   const documentId = await generateDocumentId();
 
+  const normalizedFileName = ensureFileNameHasExtension(fileName, fileType);
+
   // Create initial document record with pending status
   const document = await DocumentModel.create({
     id: documentId,
     caseId: caseData._id,
     folderName,
-    fileName,
-    fileType,
+    fileName: normalizedFileName,
+    fileType, // file extension
+    mimeType: fileType, // full MIME type from payload
     fileSize,
     cloudinaryUrl: '', // Will be updated after upload
     cloudinaryPublicId: '', // Will be updated after upload
@@ -349,15 +481,15 @@ const updateDocumentSummary = async (documentId: string, summary: string) => {
   // Ensure aiAnalysis object exists
   if (!document.aiAnalysis) {
     document.aiAnalysis = {
-        summary: '',
-        rawSummary: '',
-        keyPoints: [],
-        extractedEntities: [],
-        legalRefs: [],
-        documentCategory: null,
-        confidenceScore: 0,
-        analyzedAt: new Date(),
-        modelVersion: 'manual-update'
+      summary: '',
+      rawSummary: '',
+      keyPoints: [],
+      extractedEntities: [],
+      legalRefs: [],
+      documentCategory: null,
+      confidenceScore: 0,
+      analyzedAt: new Date(),
+      modelVersion: 'manual-update'
     };
   }
 
@@ -375,11 +507,11 @@ const autoFileDocument = async (documentId: string): Promise<void> => {
   if (!doc) throw new AppError(httpStatus.NOT_FOUND, 'Document not found');
 
   const analysis = doc.aiAnalysis;
-  
+
   if (analysis?.documentCategory && analysis?.confidenceScore > 0.85) {
     const originalFolder = doc.folderName;
     const targetFolder = analysis.documentCategory; // e.g., "Evidence", "Pleadings"
-    
+
     // Update folder and auto-filing status
     doc.folderName = targetFolder;
     doc.autoFiling = {
@@ -390,7 +522,7 @@ const autoFileDocument = async (documentId: string): Promise<void> => {
       movedAt: new Date()
     };
     await doc.save();
-    
+
     // Log activity
     await ActivityService.logActivity({
       type: 'document_moved',
@@ -422,12 +554,14 @@ const getAllUserDocuments = async (
     folder?: string;
     processingStatus?: 'pending' | 'processing' | 'completed' | 'failed';
     category?: string;
+    status?: 'active' | 'archived';
   } = {},
 ) => {
   // Build filter - get documents uploaded by this user, excluding soft-deleted
   const filter: any = {
     $or: [{ uploadedBy: userId }, { uploaderId: userId }],
     isDeleted: { $ne: true },
+    status: query.status === 'archived' ? 'archived' : { $ne: 'archived' }, // Handle legacy documents as 'active'
   };
 
   // Apply optional filters
@@ -447,9 +581,30 @@ const getAllUserDocuments = async (
     .populate('uploadedBy', 'id fullName email')
     .sort({ uploadedAt: -1 });
 
+  // Process documents to sign URLs
+  const processedDocuments = documents.map((doc) => {
+    const docObj = doc.toObject();
+    if (docObj.cloudinaryPublicId) {
+      try {
+        // Use stored mimeType if available, fall back to URL parsing for legacy documents
+        const resourceType = docObj.mimeType
+          ? resolveResourceTypeFromMime(docObj.mimeType)
+          : resolveResourceTypeFromUrl(docObj.cloudinaryUrl);
+        const deliveryType = resolveDeliveryTypeFromUrl(docObj.cloudinaryUrl);
+        docObj.cloudinaryUrl = getSignedUrl(docObj.cloudinaryPublicId, {
+          resourceType,
+          deliveryType,
+        });
+      } catch (err) {
+        console.error(`Failed to sign URL for doc ${doc.id}:`, err);
+      }
+    }
+    return docObj;
+  });
+
   // Group documents by folder
   const groupedByFolder: TGroupedDocuments = {};
-  documents.forEach((doc) => {
+  processedDocuments.forEach((doc) => {
     if (!groupedByFolder[doc.folderName]) {
       groupedByFolder[doc.folderName] = [];
     }
@@ -458,7 +613,7 @@ const getAllUserDocuments = async (
 
   // Group documents by case
   const groupedByCase: { [caseId: string]: { caseInfo: any; documents: any[] } } = {};
-  documents.forEach((doc) => {
+  processedDocuments.forEach((doc) => {
     const caseData = doc.caseId as any;
     if (caseData && caseData.id) {
       if (!groupedByCase[caseData.id]) {
@@ -478,13 +633,13 @@ const getAllUserDocuments = async (
 
   // Get category statistics
   const categoryStats: { [category: string]: number } = {};
-  documents.forEach((doc) => {
+  processedDocuments.forEach((doc) => {
     const category = doc.aiAnalysis?.documentCategory || 'Uncategorized';
     categoryStats[category] = (categoryStats[category] || 0) + 1;
   });
 
   return {
-    documents,
+    documents: processedDocuments,
     groupedByFolder,
     groupedByCase: Object.values(groupedByCase),
     categoryStats,
@@ -496,6 +651,8 @@ export const DocumentServices = {
   uploadDocument,
   getDocumentsByCase,
   deleteDocument,
+  archiveDocument,
+  restoreDocument,
   initiateDocumentUpload,
   updateProcessingStatus,
   updateCloudinaryDetails,
@@ -504,4 +661,3 @@ export const DocumentServices = {
   autoFileDocument,
   getAllUserDocuments,
 };
-

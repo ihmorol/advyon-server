@@ -10,17 +10,40 @@ import { AuthServices } from '../modules/auth/auth.service';
 
 const auth = (...requiredRoles: TUserRole[]) => {
   return catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    let token: string | undefined;
     const authHeader = req.headers.authorization;
 
+    // Check authorization header first
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    }
+    
+    // Fallback: Check for token in query params (for iframe/object requests)
+    // This is needed for the document viewer endpoints
+    // (/documents/:documentId/view and /documents/:documentId/content) where
+    // browsers can't send headers. Restricted to these paths only so bearer
+    // tokens don't leak into logs/history on every other route.
+    // Note: inside the documents router req.path is router-relative,
+    // e.g. '/<documentId>/view' or '/<documentId>/content'.
+    const isDocumentViewerPath =
+      req.baseUrl.endsWith('/documents') &&
+      (req.path.endsWith('/view') || req.path.endsWith('/content'));
+
+    if (
+      !token &&
+      isDocumentViewerPath &&
+      req.query.token &&
+      typeof req.query.token === 'string'
+    ) {
+      token = req.query.token;
+    }
+    
     // console.log('authHeader',authHeader);
     
-    // Check if authorization header exists
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // Check if token exists
+    if (!token) {
       throw new AppError(httpStatus.UNAUTHORIZED, 'You are not authorized!');
     }
-
-    // Extract token
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
     try {
       // Verify Clerk JWT token
@@ -55,7 +78,9 @@ const auth = (...requiredRoles: TUserRole[]) => {
         if (req.path === '/sync') {
           req.user = {
             clerkUserId,
-            email,
+            email: email || '',
+            userId: '',
+            mongoUserId: '',
             emailVerified: decoded.email_verified as boolean,
           };
           return next();
@@ -70,9 +95,20 @@ const auth = (...requiredRoles: TUserRole[]) => {
         }
       }
 
-      // Check if user is deleted
+      // Handle soft-deleted users
       if (user.isDeleted) {
-        throw new AppError(httpStatus.FORBIDDEN, 'This user is deleted!');
+        // Only allow re-registration through the /sync endpoint
+        if (req.path === '/sync') {
+          // Reset as a fresh account on explicit re-registration
+          user.isDeleted = false;
+          user.status = 'active';
+          user.role = 'client';
+          user.deletedAt = undefined as any;
+          await user.save();
+        } else {
+          // Block deleted users on all other requests
+          throw new AppError(httpStatus.FORBIDDEN, 'This account has been deleted. Please sign out and register again.');
+        }
       }
 
       // Check if user is blocked
@@ -99,12 +135,17 @@ const auth = (...requiredRoles: TUserRole[]) => {
         clerkUserId,
         email: email || '',
         userId: user.id,
+        mongoUserId: user._id.toString(),
         role: user?.role ? (user.role as TUserRole) : 'client',
         emailVerified: true,
       };
 
       next();
     } catch (error: any) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
       // Handle Clerk verification errors
       if (error.message?.includes('expired')) {
         throw new AppError(httpStatus.UNAUTHORIZED, 'Token has expired!');

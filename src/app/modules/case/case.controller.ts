@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import catchAsync from '../../utils/catchAsync';
 import sendResponse from '../../utils/sendResponse';
 import { CaseServices } from './case.service';
+import { CASE_TEMPLATES } from './case.template';
 
 /**
  * Create a new case
@@ -9,7 +10,7 @@ import { CaseServices } from './case.service';
  */
 const createCase = catchAsync(async (req, res) => {
   const { userId } = req.user;
-  
+
   // Map frontend fields to backend model fields
   const payload = {
     ...req.body,
@@ -148,6 +149,72 @@ const restoreCase = catchAsync(async (req, res) => {
   });
 });
 
+/**
+ * WBS-4.2: Get archived cases
+ * GET /cases/archived
+ */
+const getArchivedCases = catchAsync(async (req, res) => {
+  const { userId } = req.user;
+  const result = await CaseServices.getArchivedCases(userId, req.query);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Archived cases retrieved successfully',
+    data: result.data,
+    meta: result.meta,
+  });
+});
+
+/**
+ * WBS-4.2: Permanent delete a case
+ * DELETE /cases/:caseId/permanent
+ */
+const permanentDeleteCase = catchAsync(async (req, res) => {
+  const { userId } = req.user;
+  const { caseId } = req.params;
+
+  const result = await CaseServices.permanentDeleteCase(caseId, userId);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: result.message,
+    data: null,
+  });
+});
+
+/**
+ * WBS-5.1: Check for duplicate cases
+ * POST /cases/check-duplicate
+ */
+const checkDuplicateCase = catchAsync(async (req, res) => {
+  const { userId } = req.user;
+  const { title, caseNumber } = req.body;
+
+  const result = await CaseServices.checkDuplicateCase(userId, title, caseNumber);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: result.isDuplicate ? 'Potential duplicates found' : 'No duplicates found',
+    data: result,
+  });
+});
+
+/**
+ * WBS-5.1: Get case templates
+ * GET /cases/templates
+ */
+const getCaseTemplates = catchAsync(async (_req, res) => {
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Case templates retrieved',
+    data: CASE_TEMPLATES,
+  });
+});
+
 export const CaseControllers = {
   createCase,
   getAllCases,
@@ -156,4 +223,8 @@ export const CaseControllers = {
   deleteCase,
   archiveCase,
   restoreCase,
+  getArchivedCases,
+  permanentDeleteCase,
+  checkDuplicateCase,
+  getCaseTemplates,
 };

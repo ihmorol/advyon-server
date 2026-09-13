@@ -1,4 +1,8 @@
-// src/app/modules/user/admin/admin.interface.ts
+/**
+ * @fileoverview Admin module TypeScript interfaces.
+ * Covers user management, case oversight, system settings,
+ * analytics, bulk operations, and audit logging.
+ */
 
 export type TUserRole =
   | 'superAdmin'
@@ -30,4 +34,55 @@ export type TAdminQueryOptions = {
   search?: string;
   role?: TUserRole;
   status?: TUserStatus;
+};
+
+/** Bulk operation payload for updating multiple users at once */
+export type TBulkUserUpdate = {
+  userIds: string[];
+  action: 'activate' | 'block' | 'delete';
+};
+
+/** Case overview aggregate stats */
+export type TCaseOverview = {
+  totalCases: number;
+  activeCases: number;
+  archivedCases: number;
+  casesByStatus: Record<string, number>;
+  casesByType: Record<string, number>;
+  recentCases: any[];
+};
+
+/** System settings update payload */
+export type TSystemSettingsUpdate = {
+  siteName?: string;
+  maintenanceMode?: boolean;
+  allowRegistration?: boolean;
+  maxUploadSizeMB?: number;
+  defaultUserRole?: string;
+  sessionTimeoutMinutes?: number;
+  features?: {
+    aiTools?: boolean;
+    communityHub?: boolean;
+    billing?: boolean;
+    notifications?: boolean;
+  };
+};
+
+/** Analytics overview summary */
+export type TAnalyticsOverview = {
+  totalUsers: number;
+  activeUsers: number;
+  totalCases: number;
+  totalDocuments: number;
+  recentRegistrations: number;
+  usersByRole: Record<string, number>;
+};
+
+/** Audit log query filters */
+export type TAuditLogFilter = {
+  action?: string;
+  actorId?: string;
+  targetType?: string;
+  startDate?: string;
+  endDate?: string;
 };
